@@ -1,0 +1,11 @@
+#include <iostream>
+
+int add(const int& a, const int& b) {
+    return a + b;
+}
+
+int main(int argc, char** argv) {
+    int c = add(3,5);
+    std::cout<<c<<std::endl;
+    return 0;
+}
