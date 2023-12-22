@@ -1,0 +1,251 @@
+[4msend[24m(2)                            System Calls Manual                            [4msend[24m(2)
+
+[1mNAME[0m
+       send, sendto, sendmsg - send a message on a socket
+
+[1mLIBRARY[0m
+       Standard C library ([4mlibc[24m, [4m-lc[24m)
+
+[1mSYNOPSIS[0m
+       [1m#include <sys/socket.h>[0m
+
+       [1mssize_t send(int [4m[22msockfd[24m[1m, const void [4m[22mbuf[24m[1m[.[4m[22mlen[24m[1m], size_t [4m[22mlen[24m[1m, int [4m[22mflags[24m[1m);[0m
+       [1mssize_t sendto(int [4m[22msockfd[24m[1m, const void [4m[22mbuf[24m[1m[.[4m[22mlen[24m[1m], size_t [4m[22mlen[24m[1m, int [4m[22mflags[24m[1m,[0m
+                      [1mconst struct sockaddr *[4m[22mdest_addr[24m[1m, socklen_t [4m[22maddrlen[24m[1m);[0m
+       [1mssize_t sendmsg(int [4m[22msockfd[24m[1m, const struct msghdr *[4m[22mmsg[24m[1m, int [4m[22mflags[24m[1m);[0m
+
+[1mDESCRIPTION[0m
+       The system calls [1msend[22m(), [1msendto[22m(), and [1msendmsg[22m() are used to transmit a message to
+       another socket.
+
+       The  [1msend[22m() call may be used only when the socket is in a [4mconnected[24m state (so that
+       the intended recipient is known).  The only difference between [1msend[22m() and [1mwrite[22m(2)
+       is the presence of [4mflags[24m.  With a zero [4mflags[24m argument,  [1msend[22m()  is  equivalent  to
+       [1mwrite[22m(2).  Also, the following call
+
+           send(sockfd, buf, len, flags);
+
+       is equivalent to
+
+           sendto(sockfd, buf, len, flags, NULL, 0);
+
+       The argument [4msockfd[24m is the file descriptor of the sending socket.
+
+       If [1msendto[22m() is used on a connection-mode ([1mSOCK_STREAM[22m, [1mSOCK_SEQPACKET[22m) socket, the
+       arguments [4mdest_addr[24m and [4maddrlen[24m are ignored (and the error [1mEISCONN [22mmay be returned
+       when  they are not NULL and 0), and the error [1mENOTCONN [22mis returned when the socket
+       was not actually connected.  Otherwise, the address of  the  target  is  given  by
+       [4mdest_addr[24m  with  [4maddrlen[24m  specifying  its size.  For [1msendmsg[22m(), the address of the
+       target is given by [4mmsg.msg_name[24m, with [4mmsg.msg_namelen[24m specifying its size.
+
+       For [1msend[22m() and [1msendto[22m(), the message is found in [4mbuf[24m  and  has  length  [4mlen[24m.   For
+       [1msendmsg[22m(),  the  message  is  pointed to by the elements of the array [4mmsg.msg_iov[24m.
+       The [1msendmsg[22m() call also allows sending ancillary data (also known as  control  in‐
+       formation).
+
+       If the message is too long to pass atomically through the underlying protocol, the
+       error [1mEMSGSIZE [22mis returned, and the message is not transmitted.
+
+       No indication of failure to deliver is implicit in a [1msend[22m().  Locally detected er‐
+       rors are indicated by a return value of -1.
+
+       When  the message does not fit into the send buffer of the socket, [1msend[22m() normally
+       blocks, unless the socket has been placed in nonblocking I/O mode.  In nonblocking
+       mode it would fail with the error [1mEAGAIN [22mor [1mEWOULDBLOCK [22min  this  case.   The  [1mse‐[0m
+       [1mlect[22m(2) call may be used to determine when it is possible to send more data.
+
+   [1mThe flags argument[0m
+       The [4mflags[24m argument is the bitwise OR of zero or more of the following flags.
+
+       [1mMSG_CONFIRM [22m(since Linux 2.3.15)
+              Tell  the  link  layer that forward progress happened: you got a successful
+              reply from the other side.  If the link layer doesn't get this it will reg‐
+              ularly reprobe the neighbor (e.g., via  a  unicast  ARP).   Valid  only  on
+              [1mSOCK_DGRAM [22mand [1mSOCK_RAW [22msockets and currently implemented only for IPv4 and
+              IPv6.  See [1marp[22m(7) for details.
+
+       [1mMSG_DONTROUTE[0m
+              Don't  use a gateway to send out the packet, send to hosts only on directly
+              connected networks.  This is usually used only  by  diagnostic  or  routing
+              programs.   This  is  defined only for protocol families that route; packet
+              sockets don't.
+
+       [1mMSG_DONTWAIT [22m(since Linux 2.2)
+              Enables nonblocking operation; if the  operation  would  block,  [1mEAGAIN  [22mor
+              [1mEWOULDBLOCK  [22mis  returned.   This  provides similar behavior to setting the
+              [1mO_NONBLOCK [22mflag (via the [1mfcntl[22m(2) [1mF_SETFL [22moperation), but differs  in  that
+              [1mMSG_DONTWAIT  [22mis  a per-call option, whereas [1mO_NONBLOCK [22mis a setting on the
+              open file description (see [1mopen[22m(2)), which will affect all threads  in  the
+              calling  process  and as well as other processes that hold file descriptors
+              referring to the same open file description.
+
+       [1mMSG_EOR [22m(since Linux 2.2)
+              Terminates a record (when this notion is supported, as for sockets of  type
+              [1mSOCK_SEQPACKET[22m).
+
+       [1mMSG_MORE [22m(since Linux 2.4.4)
+              The  caller  has  more data to send.  This flag is used with TCP sockets to
+              obtain the same effect as the [1mTCP_CORK [22msocket option (see [1mtcp[22m(7)), with the
+              difference that this flag can be set on a per-call basis.
+
+              Since Linux 2.6, this flag is also supported for UDP sockets,  and  informs
+              the kernel to package all of the data sent in calls with this flag set into
+              a  single  datagram which is transmitted only when a call is performed that
+              does not specify this flag.  (See also the [1mUDP_CORK [22msocket option described
+              in [1mudp[22m(7).)
+
+       [1mMSG_NOSIGNAL [22m(since Linux 2.2)
+              Don't generate a [1mSIGPIPE [22msignal if the peer on a stream-oriented socket has
+              closed the connection.  The [1mEPIPE [22merror is still returned.   This  provides
+              similar  behavior  to  using  [1msigaction[22m(2)  to ignore [1mSIGPIPE[22m, but, whereas
+              [1mMSG_NOSIGNAL [22mis a per-call feature, ignoring [1mSIGPIPE  [22msets  a  process  at‐
+              tribute that affects all threads in the process.
+
+       [1mMSG_OOB[0m
+              Sends  [4mout-of-band[24m  data on sockets that support this notion (e.g., of type
+              [1mSOCK_STREAM[22m); the underlying protocol must also support [4mout-of-band[24m data.
+
+       [1mMSG_FASTOPEN [22m(since Linux 3.7)
+              Attempts TCP Fast Open (RFC7413) and sends data in the SYN like a  combina‐
+              tion of [1mconnect[22m(2) and [1mwrite[22m(2), by performing an implicit [1mconnect[22m(2) oper‐
+              ation.   It  blocks  until  the data is buffered and the handshake has com‐
+              pleted.  For a non-blocking socket, it returns the number of bytes buffered
+              and sent in the SYN packet.  If the cookie is not available locally, it re‐
+              turns [1mEINPROGRESS[22m, and sends a SYN with a Fast Open cookie request automat‐
+              ically.  The caller needs to write the data again when the socket  is  con‐
+              nected.   On  errors, it sets the same [4merrno[24m as [1mconnect[22m(2) if the handshake
+              fails.  This flag requires enabling TCP Fast Open client support on  sysctl
+              [4mnet.ipv4.tcp_fastopen[24m.
+
+              Refer  to  [1mTCP_FASTOPEN_CONNECT  [22msocket option in [1mtcp[22m(7) for an alternative
+              approach.
+
+   [1msendmsg()[0m
+       The definition of the [4mmsghdr[24m structure employed by [1msendmsg[22m() is as follows:
+
+           struct msghdr {
+               void         *msg_name;       /* Optional address */
+               socklen_t     msg_namelen;    /* Size of address */
+               struct iovec *msg_iov;        /* Scatter/gather array */
+               size_t        msg_iovlen;     /* # elements in msg_iov */
+               void         *msg_control;    /* Ancillary data, see below */
+               size_t        msg_controllen; /* Ancillary data buffer len */
+               int           msg_flags;      /* Flags (unused) */
+           };
+
+       The [4mmsg_name[24m field is used on an unconnected socket to specify the target  address
+       for  a  datagram.   It  points to a buffer containing the address; the [4mmsg_namelen[0m
+       field should be set to the size of the address.  For  a  connected  socket,  these
+       fields should be specified as NULL and 0, respectively.
+
+       The  [4mmsg_iov[24m  and  [4mmsg_iovlen[24m  fields  specify  scatter-gather  locations,  as for
+       [1mwritev[22m(2).
+
+       You may send control  information  (ancillary  data)  using  the  [4mmsg_control[24m  and
+       [4mmsg_controllen[24m  members.  The maximum control buffer length the kernel can process
+       is  limited  per  socket  by  the  value  in  [4m/proc/sys/net/core/optmem_max[24m;   see
+       [1msocket[22m(7).  For further information on the use of ancillary data in various socket
+       domains, see [1munix[22m(7) and [1mip[22m(7).
+
+       The [4mmsg_flags[24m field is ignored.
+
+[1mRETURN VALUE[0m
+       On  success,  these  calls  return  the number of bytes sent.  On error, -1 is re‐
+       turned, and [4merrno[24m is set to indicate the error.
+
+[1mERRORS[0m
+       These are some standard errors generated by the socket layer.   Additional  errors
+       may  be generated and returned from the underlying protocol modules; see their re‐
+       spective manual pages.
+
+       [1mEACCES [22m(For UNIX domain sockets, which are identified by pathname)  Write  permis‐
+              sion  is denied on the destination socket file, or search permission is de‐
+              nied for one of the directories the path prefix.  (See [1mpath_resolution[22m(7).)
+
+              (For UDP sockets) An attempt was made to send to  a  network/broadcast  ad‐
+              dress as though it was a unicast address.
+
+       [1mEAGAIN [22mor [1mEWOULDBLOCK[0m
+              The  socket  is marked nonblocking and the requested operation would block.
+              POSIX.1-2001 allows either error to be returned for this case, and does not
+              require these constants to have the same value, so a  portable  application
+              should check for both possibilities.
+
+       [1mEAGAIN [22m(Internet domain datagram sockets) The socket referred to by [4msockfd[24m had not
+              previously  been  bound to an address and, upon attempting to bind it to an
+              ephemeral port, it was determined that all port numbers  in  the  ephemeral
+              port    range    are   currently   in   use.    See   the   discussion   of
+              [4m/proc/sys/net/ipv4/ip_local_port_range[24m in [1mip[22m(7).
+
+       [1mEALREADY[0m
+              Another Fast Open is in progress.
+
+       [1mEBADF  [4m[22msockfd[24m is not a valid open file descriptor.
+
+       [1mECONNRESET[0m
+              Connection reset by peer.
+
+       [1mEDESTADDRREQ[0m
+              The socket is not connection-mode, and no peer address is set.
+
+       [1mEFAULT [22mAn invalid user space address was specified for an argument.
+
+       [1mEINTR  [22mA signal occurred before any data was transmitted; see [1msignal[22m(7).
+
+       [1mEINVAL [22mInvalid argument passed.
+
+       [1mEISCONN[0m
+              The connection-mode socket was connected already but a recipient was speci‐
+              fied.  (Now either this error is returned, or the  recipient  specification
+              is ignored.)
+
+       [1mEMSGSIZE[0m
+              The  socket  type requires that message be sent atomically, and the size of
+              the message to be sent made this impossible.
+
+       [1mENOBUFS[0m
+              The output queue for a network interface was full.   This  generally  indi‐
+              cates  that  the  interface has stopped sending, but may be caused by tran‐
+              sient congestion.  (Normally, this does not occur in  Linux.   Packets  are
+              just silently dropped when a device queue overflows.)
+
+       [1mENOMEM [22mNo memory available.
+
+       [1mENOTCONN[0m
+              The socket is not connected, and no target has been given.
+
+       [1mENOTSOCK[0m
+              The file descriptor [4msockfd[24m does not refer to a socket.
+
+       [1mEOPNOTSUPP[0m
+              Some bit in the [4mflags[24m argument is inappropriate for the socket type.
+
+       [1mEPIPE  [22mThe  local end has been shut down on a connection oriented socket.  In this
+              case, the process will also receive a [1mSIGPIPE [22munless [1mMSG_NOSIGNAL [22mis set.
+
+[1mSTANDARDS[0m
+       4.4BSD, SVr4, POSIX.1-2001.  These interfaces first appeared in 4.2BSD.
+
+       POSIX.1-2001 describes only the [1mMSG_OOB [22mand [1mMSG_EOR [22mflags.   POSIX.1-2008  adds  a
+       specification of [1mMSG_NOSIGNAL[22m.  The [1mMSG_CONFIRM [22mflag is a Linux extension.
+
+[1mNOTES[0m
+       According to POSIX.1-2001, the [4mmsg_controllen[24m field of the [4mmsghdr[24m structure should
+       be  typed as [4msocklen_t[24m, and the [4mmsg_iovlen[24m field should be typed as [4mint[24m, but glibc
+       currently types both as [4msize_t[24m.
+
+       See [1msendmmsg[22m(2) for information about a Linux-specific system  call  that  can  be
+       used to transmit multiple datagrams in a single call.
+
+[1mBUGS[0m
+       Linux may return [1mEPIPE [22minstead of [1mENOTCONN[22m.
+
+[1mEXAMPLES[0m
+       An example of the use of [1msendto[22m() is shown in [1mgetaddrinfo[22m(3).
+
+[1mSEE ALSO[0m
+       [1mfcntl[22m(2),  [1mgetsockopt[22m(2),  [1mrecv[22m(2),  [1mselect[22m(2),  [1msendfile[22m(2),  [1msendmmsg[22m(2),  [1mshut‐[0m
+       [1mdown[22m(2), [1msocket[22m(2), [1mwrite[22m(2), [1mcmsg[22m(3), [1mip[22m(7), [1mipv6[22m(7), [1msocket[22m(7), [1mtcp[22m(7),  [1mudp[22m(7),
+       [1munix[22m(7)
+
+Linux man-pages 6.03                    2022-12-04                                [4msend[24m(2)

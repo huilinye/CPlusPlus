@@ -1,0 +1,69 @@
+[4mlisten[24m(2)                                                                         System Calls Manual                                                                         [4mlisten[24m(2)
+
+[1mNAME[0m
+       listen - listen for connections on a socket
+
+[1mLIBRARY[0m
+       Standard C library ([4mlibc[24m, [4m-lc[24m)
+
+[1mSYNOPSIS[0m
+       [1m#include <sys/socket.h>[0m
+
+       [1mint listen(int [4m[22msockfd[24m[1m, int [4m[22mbacklog[24m[1m);[0m
+
+[1mDESCRIPTION[0m
+       [1mlisten[22m() marks the socket referred to by [4msockfd[24m as a passive socket, that is, as a socket that will be used to accept incoming connection requests using [1maccept[22m(2).
+
+       The [4msockfd[24m argument is a file descriptor that refers to a socket of type [1mSOCK_STREAM [22mor [1mSOCK_SEQPACKET[22m.
+
+       The  [4mbacklog[24m  argument  defines  the  maximum length to which the queue of pending connections for [4msockfd[24m may grow.  If a connection request arrives when the queue is full, the
+       client may receive an error with an indication of [1mECONNREFUSED [22mor, if the underlying protocol supports retransmission, the request may be ignored so that a later  reattempt  at
+       connection succeeds.
+
+[1mRETURN VALUE[0m
+       On success, zero is returned.  On error, -1 is returned, and [4merrno[24m is set to indicate the error.
+
+[1mERRORS[0m
+       [1mEADDRINUSE[0m
+              Another socket is already listening on the same port.
+
+       [1mEADDRINUSE[0m
+              (Internet  domain  sockets) The socket referred to by [4msockfd[24m had not previously been bound to an address and, upon attempting to bind it to an ephemeral port, it was de‐
+              termined that all port numbers in the ephemeral port range are currently in use.  See the discussion of [4m/proc/sys/net/ipv4/ip_local_port_range[24m in [1mip[22m(7).
+
+       [1mEBADF  [22mThe argument [4msockfd[24m is not a valid file descriptor.
+
+       [1mENOTSOCK[0m
+              The file descriptor [4msockfd[24m does not refer to a socket.
+
+       [1mEOPNOTSUPP[0m
+              The socket is not of a type that supports the [1mlisten[22m() operation.
+
+[1mSTANDARDS[0m
+       POSIX.1-2001, POSIX.1-2008, 4.4BSD ([1mlisten[22m() first appeared in 4.2BSD).
+
+[1mNOTES[0m
+       To accept connections, the following steps are performed:
+
+           (1)  A socket is created with [1msocket[22m(2).
+
+           (2)  The socket is bound to a local address using [1mbind[22m(2), so that other sockets may be [1mconnect[22m(2)ed to it.
+
+           (3)  A willingness to accept incoming connections and a queue limit for incoming connections are specified with [1mlisten[22m().
+
+           (4)  Connections are accepted with [1maccept[22m(2).
+
+       The behavior of the [4mbacklog[24m argument on TCP sockets changed with Linux 2.2.  Now it specifies the queue length for [4mcompletely[24m established sockets waiting to  be  accepted,  in‐
+       stead  of  the  number of incomplete connection requests.  The maximum length of the queue for incomplete sockets can be set using [4m/proc/sys/net/ipv4/tcp_max_syn_backlog[24m.  When
+       syncookies are enabled there is no logical maximum length and this setting is ignored.  See [1mtcp[22m(7) for more information.
+
+       If the [4mbacklog[24m argument is greater than the value in [4m/proc/sys/net/core/somaxconn[24m, then it is silently capped to that value.  Since Linux 5.4, the default in this file is 4096;
+       in earlier kernels, the default value is 128.  Before Linux 2.4.25, this limit was a hard coded value, [1mSOMAXCONN[22m, with the value 128.
+
+[1mEXAMPLES[0m
+       See [1mbind[22m(2).
+
+[1mSEE ALSO[0m
+       [1maccept[22m(2), [1mbind[22m(2), [1mconnect[22m(2), [1msocket[22m(2), [1msocket[22m(7)
+
+Linux man-pages 6.03                                                                   2022-12-04                                                                             [4mlisten[24m(2)
