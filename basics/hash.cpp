@@ -1209,3 +1209,58 @@ void  Dict<T>::set_reference_ptrs ( DataObjPtr this_node )
 
 
 } // namespace AuData
+
+
+template <typename T, typename Hasher, typename Comper>
+void HashSet<T, Hasher, Comper>::rehash(int new_hash_size) {
+    // Create new table and entries vector
+    std::vector<int> new_table(new_hash_size, EOL);
+    std::vector<Entry> new_entries;
+    new_entries.reserve(d.size); // Reserve space for non-removed entries
+
+    // Rehash and compact entries
+    for (const auto& entry : d_entries) {
+        if (entry.next >= EOL) {
+            size_t h = d_hasher(entry.val) % new_hash_size;
+            new_entries.emplace_back(entry.val, new_table[h]);
+            new_table[h] = new_entries.size() - 1;
+        }
+    }
+
+    // Swap the new table and entries with the old ones
+    d_table.swap(new_table);
+    d_entries.swap(new_entries);
+    d.hash_size = new_hash_size;
+}
+
+template <typename T, typename Hasher, typename Comper>
+bool HashSet<T, Hasher, Comper>::remove(const T& v) {
+    size_t h = d_hasher(v) % d.hash_size;
+    for (Int* i = d_table.data() + h; *i != EOL; i = &(d_entries[*i].next)) {
+        Entry& e = d_entries[*i];
+        if (d_comper(v, e.val)) {
+            e.next = -2; // Mark as deleted
+            d.size--;
+            return true;
+        }
+    }
+    return false;
+}
+
+template <typename T, typename Hasher, typename Comper>
+void HashSet<T, Hasher, Comper>::compact() {
+    std::vector<Entry> new_entries;
+    new_entries.reserve(d.size); // Reserve space for non-removed entries
+
+    for (const auto& entry : d_entries) {
+        if (entry.next >= EOL) {
+            new_entries.push_back(entry);
+        }
+    }
+
+    d_entries.swap(new_entries);
+}
+
+if (d.size / d.hash_size > d.max_depth || d.size < d_entries.size() / 2) {
+    this->compact();
+}
