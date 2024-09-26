@@ -1435,3 +1435,359 @@ int main() {
     hashSet.remove(2);
     return 0;
 }
+
+
+
+#pragma once
+
+#include <cstring>
+#include <set>
+#include <vector>
+
+
+namespace Util {
+
+// ================================================================
+// For serialization, store all strings in a single vector and access through indexes into the
+// vector.  Duplications detected and merged.
+
+class NameMap
+{
+public:
+    using  Id = unsigned int;
+
+    class NameIdPair
+    {
+        static const Id  NotSet = ~0;
+
+        // map entry: will hold either a string in 'name_vector' or a user supplied string
+        Id  id_;
+        union {
+            const char*         name;     // not in vec, id == NotSet
+            std::vector<char>*  vec;      // in vec, id is vec index
+        }  u;
+
+        friend class NameMap;
+        NameIdPair (const char* n)                  : id_(NotSet) { u.name = n; }
+        NameIdPair (std::vector<char>& v, Id i)     : id_(i)      { u.vec = &v; }
+
+    public:
+
+        Id  id () const                             { return id_; }
+        const char*  name () const
+                { if (id_ == NotSet) return u.name; else return &(*u.vec)[id_]; }
+
+        bool  operator< (const NameIdPair& rhs) const
+                { return (strcmp( name(), rhs.name()) < 0); }
+    };
+
+    // In normal use, pass in an empty vector which will contain the serialized string data at
+    // the conclusion of 'insert's
+    NameMap (const std::vector<char>& vec = std::vector<char>())
+                : name_vector( const_cast<std::vector<char>&>(vec)) {}
+
+    // Id  insert (const std::string& name)   { return insert( name.c_str() ); }
+
+    Id  insert (const char* name)
+                {
+                    auto  iter = str_map.find( NameIdPair(name) );
+                    if (iter != str_map.end())
+                        return iter->id();
+
+                    Id  id = name_vector.size();
+                    name_vector.insert( name_vector.end(), name, name + strlen(name) + 1 );
+                    str_map.insert( NameIdPair( name_vector, id ));
+                    return id;
+                }
+
+    static const Id  NOT_FOUND = ~0;
+
+    Id  lookup (const char* name) const
+                {
+                    auto  iter = str_map.find( NameIdPair(name) );
+                    return (iter != str_map.end()) ? iter->id() : NOT_FOUND;
+                }
+
+    bool  contains (const char* name) const
+                {  return (str_map.find( NameIdPair(name) ) != str_map.end());  }
+
+    const char*  operator[] (Id id)  { return name_vector.data() + id; }
+
+    int  size () const    { return str_map.size(); }
+
+    // iterator type is NameIdPair
+    using iterator = std::set<NameIdPair>::iterator;
+
+    iterator  begin ()    { return str_map.begin(); }
+    iterator  end ()      { return str_map.end(); }
+
+private:
+    std::set<NameIdPair>  str_map;
+    std::vector<char>&    name_vector;
+};
+
+};    // namespace Util
+
+// ================================================================
+// to test:
+//   create file with:
+//          #define TEST_NAME_MAP
+//          #include "NameMap.h"
+//   compile and run
+
+#ifdef TEST_NAME_MAP
+
+#include <cstdio>
+
+
+int  main ()
+{
+    std::vector<char>  v;
+    Util::NameMap::Id  md;
+    {
+        Util::NameMap  nm(v);
+
+        const char*  atlantic_states[] = {
+            "Maine", "New Hampshire", "Massachusetts", "Rhode Island", "Connecticut", "New York",
+            "New Jersey", "Delaware", "Maryland", "Virginia", "North Carolina", "South Carolina",
+            "Georgia", "Georgia", "Florida", nullptr
+        };
+
+        for (int i = 0;  atlantic_states[i];  i++)
+            nm.insert( atlantic_states[i] );
+
+        md = nm.insert( "Maryland" );
+    
+        printf( "no. states = %d\n", nm.size() );
+        printf( "MD = %s\n", nm[md] );
+        printf( "has MA = %c\n", nm.contains("Massachusetts") ? 'T' : 'F' );
+        printf( "has CA = %c\n", nm.contains("California") ? 'T' : 'F' );
+        printf( "MA = %s\n", nm[ nm.lookup("Massachusetts") ] );
+        printf( "id CA = %d\n", nm.lookup("California") );
+
+        printf( "sorted entries\n" );
+        for (auto x : nm)
+            printf( "  %3d = %s\n", x.id(), x.name() );
+    }
+
+    printf( "MD = %s\n", &v[md] );
+}
+
+
+#endif
+
+
+
+
+#pragma once
+
+#include "Hash.h"
+#include <unordered_set>
+
+namespace AuData {
+
+// ================================================================
+
+template <typename T>
+class Dict : public DataObj {
+public:
+
+    using Id = int;
+    using StringId = int;
+
+    // HashSet entry type
+    using V = std::pair<StringId, T>;  // [ index of string in the 'names' vector, data value ]
+
+    // ================
+    // Hash and compare function class for the hash table
+    class NameIdPair {
+        static const Id   NotSet = ~0; // use local rather than stored
+        // Reason to use reference here: to make hasher and comper have the same things with nip;
+        const char*&              local_name_;
+        const std::vector<char>*  stored_names_;
+
+    public:
+        NameIdPair ( const char*& local_name, std::shared_ptr<std::vector<char>>& names )
+                                                         : local_name_( local_name ),
+                                                           stored_names_( names.get() ) {}
+
+        Id           local_name( const char* name )      { local_name_ = name; return NotSet; }
+        const char*  name ( StringId id ) const          { return id == NotSet ? local_name_ : stored_names_->data() + id; }
+
+        void         operator= ( const NameIdPair& nip ) { local_name_ = nip.local_name_;
+                                                           stored_names_ = nip.stored_names_; }
+        // Hasher
+        size_t       operator() ( V v ) const            { return Util::Hash<const char*>()( name( v.first ) ); }
+
+        // Comper
+        bool         operator() ( V a, V b ) const       { return strcmp( name( a.first ), name( b.first ) ) == 0; }
+    };
+
+
+    using Hset = Util::HashSet<V, NameIdPair, NameIdPair>;
+    using Iter = typename std::vector<typename Hset::Entry>::iterator;
+
+    // ================
+    class Reference {
+    public:
+        std::string                        _key;
+        std::shared_ptr<std::vector<char>> _names;
+        std::shared_ptr<NameIdPair>        _nip;
+        std::shared_ptr<Hset>              _d;
+
+        Reference( const std::string& key_,
+                   std::shared_ptr<std::vector<char>>& names_,
+                   std::shared_ptr<NameIdPair>& nip_,
+                   std::shared_ptr<Hset>& d_ )
+            : _key( key_ ),  _names( names_ ), _nip( nip_ ), _d( d_ ) {};
+
+        Reference& operator= ( T value );
+
+        // unlike std::map or ordered_map, do NOT insert if key is not already in the dict, throw Error instead
+        operator T () const;
+
+        // friend std::ostream&  operator<< ( std::ostream& s, const Reference& c );
+    };
+
+    // ================
+    class iterator {
+        Iter _current;
+        Dict& _d;
+        using V = std::pair<std::string, Reference>;
+    public:
+
+        iterator( Iter iter_, Dict& d_ ) : _current( iter_ ), _d( d_ ) {}
+
+        StringId       string_id () const               { return _current->first; }
+
+        V              operator*()                      { std::string name = _d.nip->name( ( *_current ).val.first ); return V( name, _d[name] ); }
+        const V        operator*() const                { std::string name = _d.nip->name( ( *_current ).val.first ); return V( name, _d[name] ); }
+        iterator&      operator++() noexcept            { _current++; return *this; }
+        iterator       operator++( int ) noexcept       { iterator temp( *this );  ++( *this ); return temp; }
+        iterator       operator+( int i ) noexcept      { iterator temp( *this );  _current += i; return temp; }
+        const iterator operator++( int ) const noexcept { iterator temp( *this );  ++( *const_cast<iterator*>( this ) ); return temp; }
+        iterator&      operator--() noexcept            {  _current--; return *this; }
+        iterator       operator--( int )  noexcept      { iterator temp( *this );  --( *this ); return temp; }
+        iterator       operator-( int i )  noexcept     {  _current -= i; return *this; }
+        const iterator operator--( int ) const noexcept { iterator temp( *this );  --( *const_cast<iterator*>( this ) ); return temp; }
+
+        // comparison
+        bool operator== ( const iterator& rhs ) const noexcept  { return _current == rhs._current; }
+        bool operator!= ( const iterator& rhs ) const noexcept  { return _current != rhs._current; }
+        bool operator<  ( const iterator& rhs ) const noexcept  { return _current < rhs._current; }
+        bool operator>  ( const iterator& rhs ) const noexcept  { return _current > rhs._current; }
+        bool operator<= ( const iterator& rhs ) const noexcept  { return _current <= rhs._current; }
+        bool operator>= ( const iterator& rhs ) const noexcept  { return _current >= rhs._current; }
+    };
+
+
+    //public:      // why public?
+    const char*                        dflt_name = nullptr; // what is this for?
+    std::shared_ptr<std::vector<char>> names;
+    std::shared_ptr<NameIdPair>        nip;
+    std::shared_ptr<Hset>              d;
+    std::unordered_set<StringId>       deleted_ids; // Track deleted IDs
+
+    Dict ( SchemaPtr sch_,
+               std::shared_ptr<std::vector<char>>& names_,
+               std::shared_ptr<NameIdPair>& nip_,
+               std::shared_ptr<Hset>& d_ );
+
+public: // ================================================================
+
+    using value_type = T;
+
+    Dict ( SchemaPtr sch );
+    Dict ( SchemaPtr sch, const std::string& path );
+
+    // If not find key in d, insert the value
+    // If dind key in d, update the old value with provided one
+    // returns string_id
+    StringId        insert ( const std::string& key, T value );
+
+    bool            contains ( const std::string& key ) const;
+
+    // return value connected with 'key' if it exists in dictionary, else return 'dflt'
+    const T&        lookup ( const std::string& key, const T& dflt = T{} ) const;
+    // return id which can be efficently stored and used to lookup string with dict[str_id]; or ~0 if not found
+    IdType          string_id ( const std::string& key ) const;
+
+    // Operator= of reference will perform the same thing as insert function
+    Reference       operator[] ( const std::string& key )    { return Reference( key, names, nip, d ); }
+
+    const T&        operator[] ( const std::string& key ) const; // same as lookup, but throws excetion on error
+    const T&        operator[] ( IdType id ) const;
+    std::string     key_at ( IdType id ) const;
+
+    bool            empty () const                           { return d->size() == 0; }
+
+    void            clear ()                                 { std::vector<char>().swap( *names ); d->clear(); deleted_ids.clear(); }
+
+    iterator        find ( const std::string& key );
+
+    iterator        begin ()                                 { return iterator( d->get_hash_data().begin(), *this );  }
+    iterator        end ()                                   { return iterator( d->get_hash_data().end(), *this ); }
+
+    const iterator  begin () const                           { return iterator( d->get_hash_data().begin(), *this );  }
+    const iterator  end () const                             { return iterator( d->get_hash_data().end(), *this ); }
+
+    size_t          size () const override                   { return d->size(); }
+    size_t          size_bytes () const override             { return 0; }// TODO
+
+    DataObjPtr      slice ( size_t offset, size_t slice_size = ~0 ) override;
+    DataObjPtr      slice_copy ( size_t offset, size_t slice_size = ~0 ) override;
+
+    void            repr (std::ostream& s, int level) const override;
+    void            print ( int level = 0 ) const override;
+
+    // ================ internal ================
+    GenericValue    gvget ( const char* key ) const override;
+    GenericValue    gvget ( int id ) const override;
+    int             gvset ( const char* key, GenericValue val ) override;
+    void            serialize ( MPSys::Message& msg, DataObjPtr p ) override;
+    void            unload () override;
+    void            set_reference_ptrs ( DataObjPtr this_node );
+    DataObjPtr      reference ()        { return d_reference; }
+
+    // Erase method to remove a key-value pair
+    bool erase(const std::string& key) {
+        auto iter = find(key);
+        if (iter == end()) {
+            return false;
+        }
+        deleted_ids.insert(iter.string_id());
+        d->erase(iter._current);
+        return true;
+    }
+
+    // Compact the names vector by removing deleted entries
+    void compact() {
+        std::vector<char> new_names;
+        std::unordered_map<StringId, StringId> id_map;
+
+        StringId new_id = 0;
+        for (StringId old_id = 0; old_id < names->size(); ) {
+            if (deleted_ids.find(old_id) == deleted_ids.end()) {
+                const char* name = &(*names)[old_id];
+                id_map[old_id] = new_id;
+                new_names.insert(new_names.end(), name, name + strlen(name) + 1);
+                new_id += strlen(name) + 1;
+            }
+            old_id += strlen(&(*names)[old_id]) + 1;
+        }
+
+        *names = std::move(new_names);
+        deleted_ids.clear();
+
+        // Update the hash set with new IDs
+        for (auto& entry : *d) {
+            entry.val.first = id_map[entry.val.first];
+        }
+    }
+
+private:
+    std::string  d_path;
+    DataObjPtr   d_reference;
+};
+
+} // namespace AuData
