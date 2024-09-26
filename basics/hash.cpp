@@ -1264,3 +1264,174 @@ void HashSet<T, Hasher, Comper>::compact() {
 if (d.size / d.hash_size > d.max_depth || d.size < d_entries.size() / 2) {
     this->compact();
 }
+
+
+
+#include <vector>
+#include <functional>
+#include <cassert>
+
+namespace Util {
+
+template <typename T, typename Hasher = std::hash<T>, typename Comper = std::equal_to<T>>
+class HashSet {
+    using Int = int;
+    static const Int EOL = -1;
+
+public:
+    struct Entry {
+        T val;
+        Int next;
+        Entry(const T& v, Int n) : val(v), next(n) {}
+        Entry() = default;
+    };
+
+    struct HashInfo {
+        Int hash_size;
+        Int size;
+        Int max_depth;
+        Int rehash_mult;
+        Int free_list;
+        T null_val;
+    };
+
+private:
+    HashInfo d;
+    std::vector<Int> d_table;
+    std::vector<Entry> d_entries;
+    Hasher d_hasher;
+    Comper d_comper;
+
+public:
+    HashSet(int hash_size = 256, const T& null_val = T(), Hasher hasher = Hasher(), Comper comper = Comper());
+
+    std::pair<const T&, bool> insert(const T& v);
+    bool remove(const T& v);
+    void rehash(int new_hash_size);
+    void clear();
+    bool empty() const { return d.size == 0; }
+    size_t size() const { return d.size; }
+    bool contains(const T& v) const;
+    std::pair<const T&, bool> find(const T& v) const;
+
+private:
+    Int _new_entry(const T& val, Int next);
+    void check_load_factor();
+};
+
+template <typename T, typename Hasher, typename Comper>
+HashSet<T, Hasher, Comper>::HashSet(int hash_size, const T& null_val, Hasher hasher, Comper comper)
+    : d_table(hash_size, EOL), d_hasher(hasher), d_comper(comper) {
+    d.hash_size = hash_size;
+    d.size = 0;
+    d.max_depth = 4;
+    d.rehash_mult = 4;
+    d.free_list = _free_list_link(EOL);
+    d.null_val = null_val;
+}
+
+template <typename T, typename Hasher, typename Comper>
+std::pair<const T&, bool> HashSet<T, Hasher, Comper>::insert(const T& v) {
+    check_load_factor();
+    size_t h = d_hasher(v) % d.hash_size;
+    for (Int i = d_table[h]; i != EOL; i = d_entries[i].next) {
+        if (d_comper(v, d_entries[i].val))
+            return { d_entries[i].val, false };
+    }
+    Int idx = _new_entry(v, d_table[h]);
+    d_table[h] = idx;
+    return { d_entries[idx].val, true };
+}
+
+template <typename T, typename Hasher, typename Comper>
+bool HashSet<T, Hasher, Comper>::remove(const T& v) {
+    size_t h = d_hasher(v) % d.hash_size;
+    for (Int* i = &d_table[h]; *i != EOL; i = &d_entries[*i].next) {
+        Entry& e = d_entries[*i];
+        if (d_comper(v, e.val)) {
+            int idx = *i;
+            *i = e.next;
+            e.val = d.null_val;
+            e.next = d.free_list;
+            d.free_list = _free_list_link(idx);
+            d.size--;
+            return true;
+        }
+    }
+    return false;
+}
+
+template <typename T, typename Hasher, typename Comper>
+void HashSet<T, Hasher, Comper>::rehash(int new_hash_size) {
+    std::vector<Int> new_table(new_hash_size, EOL);
+    for (Int i = 0; i < d_entries.size(); ++i) {
+        if (d_entries[i].next >= EOL) {
+            size_t h = d_hasher(d_entries[i].val) % new_hash_size;
+            d_entries[i].next = new_table[h];
+            new_table[h] = i;
+        }
+    }
+    d_table = std::move(new_table);
+    d.hash_size = new_hash_size;
+}
+
+template <typename T, typename Hasher, typename Comper>
+void HashSet<T, Hasher, Comper>::clear() {
+    std::fill(d_table.begin(), d_table.end(), EOL);
+    d_entries.clear();
+    d.size = 0;
+}
+
+template <typename T, typename Hasher, typename Comper>
+bool HashSet<T, Hasher, Comper>::contains(const T& v) const {
+    size_t h = d_hasher(v) % d.hash_size;
+    for (Int i = d_table[h]; i != EOL; i = d_entries[i].next) {
+        if (d_comper(v, d_entries[i].val))
+            return true;
+    }
+    return false;
+}
+
+template <typename T, typename Hasher, typename Comper>
+std::pair<const T&, bool> HashSet<T, Hasher, Comper>::find(const T& v) const {
+    size_t h = d_hasher(v) % d.hash_size;
+    for (Int i = d_table[h]; i != EOL; i = d_entries[i].next) {
+        if (d_comper(v, d_entries[i].val))
+            return { d_entries[i].val, true };
+    }
+    return { v, false };
+}
+
+template <typename T, typename Hasher, typename Comper>
+typename HashSet<T, Hasher, Comper>::Int HashSet<T, Hasher, Comper>::_new_entry(const T& val, Int next) {
+    d.size++;
+    if (d.free_list != _free_list_link(EOL)) {
+        Int idx = _free_list_link(d.free_list);
+        d.free_list = d_entries[idx].next;
+        d_entries[idx].val = val;
+        d_entries[idx].next = next;
+        return idx;
+    } else {
+        Int idx = d_entries.size();
+        d_entries.emplace_back(val, next);
+        return idx;
+    }
+}
+
+template <typename T, typename Hasher, typename Comper>
+void HashSet<T, Hasher, Comper>::check_load_factor() {
+    if (d.size > d.hash_size * d.max_depth) {
+        rehash(d.hash_size * d.rehash_mult);
+    }
+}
+
+} // namespace Util
+
+int main() {
+    Util::HashSet<int> hashSet;
+    hashSet.insert(1);
+    hashSet.insert(2);
+    hashSet.insert(3);
+    hashSet.remove(2);
+    return 0;
+}
