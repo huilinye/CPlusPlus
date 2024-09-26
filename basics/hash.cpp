@@ -1791,3 +1791,29 @@ private:
 };
 
 } // namespace AuData
+
+Using a custom dictionary implementation like the one you have, which keeps all data in continuous memory, can indeed be beneficial for IPC (Inter-Process Communication) due to the following reasons:
+
+1. **Continuous Memory**: Keeping all data in a continuous memory block can simplify the process of sharing data between processes, as it avoids the need for complex serialization and deserialization steps.
+2. **Performance**: Accessing data in continuous memory can be faster due to better cache locality compared to scattered memory allocations.
+
+However, there are trade-offs to consider, especially regarding the `erase` operation and the potential need for compaction:
+
+### Pros
+
+1. **Efficient IPC**: Continuous memory layout is ideal for IPC, as it can be shared directly between processes without the need for serialization.
+2. **Cache Efficiency**: Access patterns that benefit from cache locality can see performance improvements.
+3. **Simplified Serialization**: Direct memory sharing reduces the overhead of serialization and deserialization.
+
+### Cons
+
+1. **Compaction Overhead**: The need to compact the memory after deletions can introduce significant overhead, especially if deletions are frequent. Compaction involves copying data and updating references, which can be time-consuming.
+2. **Memory Fragmentation**: Without compaction, the memory can become fragmented, leading to inefficient use of memory and potential performance degradation.
+3. **Complexity**: Implementing and maintaining a custom data structure with compaction logic can be more complex compared to using standard containers like `std::unordered_map`.
+
+### Evaluation
+
+1. **Use Case Suitability**: If your application involves frequent IPC and the data structure is shared between processes, the benefits of continuous memory might outweigh the compaction overhead. However, if deletions are frequent, the overhead of compaction could become a bottleneck.
+2. **Frequency of Operations**: Evaluate the frequency of insertions, deletions, and lookups. If deletions are rare, the compaction overhead might be negligible. Conversely, if deletions are common, the overhead could be significant.
+3. **Performance Testing**: Conduct performance testing to measure the impact of compaction on your specific workload. Compare the performance with a standard `std::unordered_map` to determine if the benefits of continuous memory outweigh the costs.
+4. **Hybrid Approach**: Consider a hybrid approach where you use `std::unordered_map` for operations that involve frequent deletions and the custom dictionary for IPC scenarios where data is mostly read-only.
