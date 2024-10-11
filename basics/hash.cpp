@@ -1817,3 +1817,402 @@ However, there are trade-offs to consider, especially regarding the `erase` oper
 2. **Frequency of Operations**: Evaluate the frequency of insertions, deletions, and lookups. If deletions are rare, the compaction overhead might be negligible. Conversely, if deletions are common, the overhead could be significant.
 3. **Performance Testing**: Conduct performance testing to measure the impact of compaction on your specific workload. Compare the performance with a standard `std::unordered_map` to determine if the benefits of continuous memory outweigh the costs.
 4. **Hybrid Approach**: Consider a hybrid approach where you use `std::unordered_map` for operations that involve frequent deletions and the custom dictionary for IPC scenarios where data is mostly read-only.
+
+
+#include <cstring>
+#include <functional>
+#include <string_view>
+
+struct CStringHash {
+    size_t operator()(const char* str) const {
+        return std::hash<std::string_view>{}(std::string_view(str));
+    }
+};
+
+struct CStringEqual {
+    bool operator()(const char* lhs, const char* rhs) const {
+        return std::strcmp(lhs, rhs) == 0;
+    }
+};
+
+#include <vector>
+#include <string>
+#include <iostream>
+#include <functional>
+#include <stdexcept>
+#include <string_view>
+#include <utility>
+#include <limits>
+#include <cstring>
+
+template <typename T>
+struct Entry {
+    T value;
+    int next;
+};
+
+struct HashInfo {
+    int freeIndex;
+    size_t entryCount;
+    size_t maxDepth;
+    double rehashMultiplier;
+};
+
+template <typename T, typename Hasher = std::hash<T>, typename Comparer = std::equal_to<T>>
+class FlatHash {
+public:
+    FlatHash(size_t tableSize, size_t maxDepth = 5, double rehashMultiplier = 2.0)
+        : table(tableSize, endOfList), hashInfo{endOfList, 0, maxDepth, rehashMultiplier} {}
+
+    bool insert(const T& value) {
+        return insertImpl(value);
+    }
+
+    bool insert(T&& value) {
+        return insertImpl(std::move(value));
+    }
+
+    bool contains(const T& value) const {
+        size_t hashValue = hashFunction(value) % table.size();
+        int index = table[hashValue];
+        while (index != endOfList) {
+            if (comparer(entries[index].value, value)) {
+                return true;
+            }
+            index = entries[index].next;
+        }
+        return false;
+    }
+
+    bool remove(const T& value) {
+        size_t hashValue = hashFunction(value) % table.size();
+        int index = table[hashValue];
+        int prevIndex = endOfList;
+        while (index != endOfList) {
+            if (comparer(entries[index].value, value)) {
+                if (prevIndex == endOfList) {
+                    table[hashValue] = entries[index].next;
+                } else {
+                    entries[prevIndex].next = entries[index].next;
+                }
+                entries[index].value = nullValue;
+                entries[index].next = hashInfo.freeIndex;
+                hashInfo.freeIndex = index;
+                --hashInfo.entryCount;
+                return true;
+            }
+            prevIndex = index;
+            index = entries[index].next;
+        }
+        return false;
+    }
+
+    size_t getTableSize() const {
+        return table.size();
+    }
+
+    size_t getEntryCount() const {
+        return hashInfo.entryCount;
+    }
+
+    size_t getMaxDepth() const {
+        return hashInfo.maxDepth;
+    }
+
+    double getRehashMultiplier() const {
+        return hashInfo.rehashMultiplier;
+    }
+
+    class Iterator {
+    public:
+        Iterator(const FlatHash& set, int index) : set(set), index(index) {}
+
+        bool operator!=(const Iterator& other) const {
+            return index != other.index;
+        }
+
+        const T& operator*() const {
+            return set.entries[index].value;
+        }
+
+        Iterator& operator++() {
+            do {
+                ++index;
+            } while (index < set.entries.size() && set.entries[index].next == endOfList);
+            return *this;
+        }
+
+    private:
+        const FlatHash& set;
+        int index;
+    };
+
+    Iterator begin() const {
+        int startIndex = 0;
+        while (startIndex < entries.size() && entries[startIndex].next == endOfList) {
+            ++startIndex;
+        }
+        return Iterator(*this, startIndex);
+    }
+
+    Iterator end() const {
+        return Iterator(*this, entries.size());
+    }
+
+protected:
+    std::vector<int> table;
+    std::vector<Entry<T>> entries;
+    HashInfo hashInfo;
+    Hasher hashFunction;
+    Comparer comparer;
+
+    static constexpr int endOfList = -1;
+    static constexpr T nullValue = T();
+
+    int getFreeIndex() {
+        if (hashInfo.freeIndex != endOfList) {
+            int index = hashInfo.freeIndex;
+            hashInfo.freeIndex = entries[hashInfo.freeIndex].next;
+            return index;
+        }
+        entries.push_back({nullValue, endOfList});
+        return entries.size() - 1;
+    }
+
+    size_t updateMaxDepth(size_t hashValue) {
+        size_t depth = 0;
+        int index = table[hashValue];
+        while (index != endOfList) {
+            ++depth;
+            index = entries[index].next;
+        }
+        return depth;
+    }
+
+    void rehash() {
+        size_t newSize = table.size() * hashInfo.rehashMultiplier;
+        std::vector<int> newTable(newSize, endOfList);
+        std::vector<Entry<T>> newEntries;
+        newEntries.reserve(entries.size());
+
+        for (const auto& entry : entries) {
+            if (entry.next != endOfList) {
+                size_t hashValue = hashFunction(entry.value) % newSize;
+                newEntries.push_back({entry.value, newTable[hashValue]});
+                newTable[hashValue] = newEntries.size() - 1;
+            }
+        }
+
+        table = std::move(newTable);
+        entries = std::move(newEntries);
+        hashInfo.freeIndex = endOfList;
+    }
+
+private:
+    template <typename U>
+    bool insertImpl(U&& value) {
+        size_t hashValue = hashFunction(value) % table.size();
+        if (contains(value)) {
+            return false; // Value already exists
+        }
+        int index = getFreeIndex();
+        entries[index] = {std::forward<U>(value), table[hashValue]};
+        table[hashValue] = index;
+        ++hashInfo.entryCount;
+        if (updateMaxDepth(hashValue) > hashInfo.maxDepth) {
+            rehash();
+        }
+        return true;
+    }
+};
+
+template <typename T, typename Hasher = std::hash<T>, typename Comparer = std::equal_to<T>>
+using HashSet = FlatHash<T, Hasher, Comparer>;
+
+template <typename Key, typename Value, typename Hasher = std::hash<Key>, typename Comparer = std::equal_to<Key>>
+class HashMap : public FlatHash<std::pair<Key, Value>, Hasher, Comparer> {
+public:
+    using Base = FlatHash<std::pair<Key, Value>, Hasher, Comparer>;
+    using Base::Base;
+
+    bool insert(const Key& key, const Value& value) {
+        return Base::insert({key, value});
+    }
+
+    bool insert(Key&& key, Value&& value) {
+        return Base::insert({std::move(key), std::move(value)});
+    }
+
+    bool contains(const Key& key) const {
+        return Base::contains({key, Value()});
+    }
+
+    Value get(const Key& key) const {
+        size_t hashValue = this->hashFunction(key) % this->table.size();
+        int index = this->table[hashValue];
+        while (index != this->endOfList) {
+            if (this->comparer(this->entries[index].value.first, key)) {
+                return this->entries[index].value.second;
+            }
+            index = this->entries[index].next;
+        }
+        throw std::runtime_error("Key not found");
+    }
+
+    bool remove(const Key& key) {
+        return Base::remove({key, Value()});
+    }
+
+    class Iterator {
+    public:
+        Iterator(const HashMap& map, int index) : map(map), index(index) {}
+
+        bool operator!=(const Iterator& other) const {
+            return index != other.index;
+        }
+
+        const std::pair<Key, Value>& operator*() const {
+            return map.entries[index].value;
+        }
+
+        Iterator& operator++() {
+            do {
+                ++index;
+            } while (index < map.entries.size() && map.entries[index].next == map.endOfList);
+            return *this;
+        }
+
+    private:
+        const HashMap& map;
+        int index;
+    };
+
+    Iterator begin() const {
+        int startIndex = 0;
+        while (startIndex < this->entries.size() && this->entries[startIndex].next == this->endOfList) {
+            ++startIndex;
+        }
+        return Iterator(*this, startIndex);
+    }
+
+    Iterator end() const {
+        return Iterator(*this, this->entries.size());
+    }
+};
+
+class StorageHasherComparer {
+public:
+    StorageHasherComparer(const std::vector<char>& storage) : storage(storage) {}
+
+    size_t operator()(const std::string_view& key) const {
+        return std::hash<std::string_view>{}(key);
+    }
+
+    bool operator()(int index, const std::string_view& key) const {
+        return std::string_view(&storage[index], key.size()) == key;
+    }
+
+private:
+    const std::vector<char>& storage;
+};
+
+template <typename Value>
+class Dictionary {
+public:
+    Dictionary(size_t tableSize) : storage(), hasher(storage), comparer(storage), hashMap(tableSize, hasher, comparer) {}
+
+    bool add(const std::string& key, const Value& value) {
+        if (hashMap.contains(key)) {
+            return false; // Key already exists
+        }
+        size_t pos = storage.size();
+        storage.insert(storage.end(), key.begin(), key.end());
+        storage.push_back('\0'); // Null-terminate the string
+        hashMap.insert(std::string_view(&storage[pos], key.size()), {pos, value});
+        return true;
+    }
+
+    bool contains(const std::string& key) const {
+        return hashMap.contains(key);
+    }
+
+    Value get(const std::string& key) const {
+        return hashMap.get(key);
+    }
+
+    bool remove(const std::string& key) {
+        return hashMap.remove(key);
+    }
+
+    class Iterator {
+    public:
+        Iterator(const Dictionary& dict, typename HashMap<std::string_view, std::pair<int, Value>, StorageHasherComparer>::Iterator it)
+            : dict(dict), it(it) {}
+
+        bool operator!=(const Iterator& other) const {
+            return it != other.it;
+        }
+
+        std::pair<std::string, Value> operator*() const {
+            const auto& entry = *it;
+            return {std::string(&dict.storage[entry.second.first]), entry.second.second};
+        }
+
+        Iterator& operator++() {
+            ++it;
+            return *this;
+        }
+
+    private:
+        const Dictionary& dict;
+        typename HashMap<std::string_view, std::pair<int, Value>, StorageHasherComparer>::Iterator it;
+    };
+
+    Iterator begin() const {
+        return Iterator(*this, hashMap.begin());
+    }
+
+    Iterator end() const {
+        return Iterator(*this, hashMap.end());
+    }
+
+private:
+    std::vector<char> storage;
+    StorageHasherComparer hasher;
+    StorageHasherComparer comparer;
+    HashMap<std::string_view, std::pair<int, Value>, StorageHasherComparer, StorageHasherComparer> hashMap;
+};
+
+int main() {
+    HashSet<const char*, CStringHash, CStringEqual> hashSet(10);
+    hashSet.insert("hello");
+    hashSet.insert("world");
+
+    for (const auto& value : hashSet) {
+        std::cout << "HashSet value: " << value << std::endl;
+    }
+
+    HashMap<const char*, int, CStringHash, CStringEqual> hashMap(10);
+    hashMap.insert("hello", 1);
+    hashMap.insert("world", 2);
+
+    for (const auto& pair : hashMap) {
+        std::cout << "HashMap key: " << pair.first << ", value: " << pair.second << std::endl;
+    }
+
+    Dictionary<int> dict(10);
+    dict.add("hello", 1);
+    dict.add("world", 2);
+
+    for (const auto& pair : dict) {
+        std::cout << "Dictionary key: " << pair.first << ", value: " << pair.second << std::endl;
+    }
+
+    dict.remove("hello");
+
+    if (!dict.contains("hello")) {
+        std::cout << "Key 'hello' not found in dictionary" << std::endl;
+    }
+
+    return 0;
+}
